@@ -17,3 +17,5 @@ tfsec
 *.pem
 *.key
 *.crt
+.terraform/
+terraform.tfvars
