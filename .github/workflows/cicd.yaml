@@ -1,87 +1,190 @@
-name: Deploy to AWS with Terraform
+name: Deploy Banking App Infrastructure
+
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to run'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
 permissions:
-    contents: write
-    id-token: write
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  TF_VAR_db_username: ${{ secrets.TF_VAR_DB_USERNAME }}
+  TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+  TF_VAR_db_name: ${{ secrets.TF_VAR_DB_NAME }}
+  TF_VAR_zone_name: ${{ secrets.TF_VAR_ZONE_NAME }}
+  TF_VAR_domain_name: ${{ secrets.TF_VAR_DOMAIN_NAME }}
+  TF_VAR_email: ${{ secrets.TF_VAR_EMAIL }}
+  TF_VAR_namecheap_api_user: ${{ secrets.TF_VAR_NAMECHEAP_API_USER }}
+  TF_VAR_namecheap_api_key: ${{ secrets.TF_VAR_NAMECHEAP_API_KEY }}
+  TF_VAR_namecheap_username: ${{ secrets.TF_VAR_NAMECHEAP_USERNAME }}
+  TF_VAR_namecheap_client_ip: ${{ secrets.TF_VAR_NAMECHEAP_CLIENT_IP }}
+
 jobs:
-  deploy-iac:
-    runs-on: terraform
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
+  security-scan:
+    name: Security scan
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-      - name: Setup GitHub OIDC
-        run: | 
-           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-           unzip awscliv2.zip
-           sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
-      - name: Configure AWS credentials using OIDC
+        uses: actions/checkout@v4
+
+      - name: Run tfsec security scan
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          soft_fail: true
+
+  terraform-plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ secrets.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v1
+        uses: hashicorp/setup-terraform@v3
         with:
-            cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
-            terraform_wrapper: false  # Critical: disable wrapper for raw output
-      # - name: Install tfsec for security scanning
-      #   run: |
-      #     curl -sLo tfsec https://github.com/aquasecurity/tfsec/releases/download/v1.28.11/tfsec-linux-amd64
-      #     chmod +x tfsec
-      #     sudo mv tfsec /usr/local/bin/
-      #     tfsec --version
-      # - name: Terraform Init
-      #   run: terraform init
-      # - name: Terraform Format
-      #   run: terraform fmt
-      # - name: Terraform Validate
-      #   run: terraform validate
-      # - name: tfsec Security Scan
-      #   run: tfsec . || true
-      # - name: Terraform Plan
-      #   run: terraform plan 
-      # - name: Terraform Apply
-      #   run: terraform apply -auto-approve
-      # - name: Export EKS cluster name from Terraform
-      #   id: tfoutputs
-      #   run: |
-      # #     # Get the cluster name and sanitize it
-      # #     CLUSTER_NAME=$(terraform output -raw eks_cluster_name | tr -d '\n' | tr -d '\r' | xargs)
-          
-      # #     # Validate it's not empty
-      # #     if [ -z "$CLUSTER_NAME" ]; then
-      # #       echo "Error: CLUSTER_NAME is empty"
-      # #       exit 1
-      # #     fi
-          
-      # #     # Write to GITHUB_ENV with proper delimiter format (safer for multi-line)
-      # #     echo "CLUSTER_NAME=$CLUSTER_NAME" >> "$GITHUB_ENV"
-          
-      # #     # Also output for verification
-      # #     echo "Cluster name extracted: $CLUSTER_NAME"
-      # # - name: Install kubectl
-      # #   run: |
-      # #     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-      # #     chmod +x kubectl
-      # #     sudo mv kubectl /usr/local/bin/
-      # #     kubectl version --client
-      # # - name: Authenticate to EKS Cluster
-      # #   run: |
-      # #     echo "Connecting to cluster: ${{ env.CLUSTER_NAME }}"
-      # #     aws eks update-kubeconfig --name "${{ env.CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}"
-      # # - name: Verify kubectl connection
-      # #   run: kubectl cluster-info
-      # # - name: Deploy ClusterIssuer to EKS
-      # #   run: kubectl apply -f ClusterIssuer.yaml
-      # # - name: Deploy ArgoCD ingress rule to EKS
-      # #   run: kubectl apply -f ingress-argocd.yaml -n argocd
-      # # - name: Terraform Destroy
-      # #   run: terraform destroy -auto-approve  
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: |
+          terraform plan \
+            -out=tfplan \
+            -input=false
+      
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+          retention-days: 5
+
+  terraform-apply:
+    name: Terraform apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: |
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Export EKS cluster name
+        id: tfoutputs
+        run: |
+          CLUSTER_NAME=$(terraform output -raw eks_cluster_name | tr -d '\n' | tr -d '\r' | xargs)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "Error: CLUSTER_NAME is empty"
+            exit 1
+          fi
+          echo "CLUSTER_NAME=$CLUSTER_NAME" >> "$GITHUB_ENV"
+          echo "Cluster name: $CLUSTER_NAME"
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+
+      - name: Authenticate to EKS cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Verify kubectl connection
+        run: kubectl cluster-info
+
+      - name: Deploy ClusterIssuer
+        run: kubectl apply -f ClusterIssuer.yaml
+
+      - name: Deploy ArgoCD ingress
+        run: kubectl apply -f ingress-argocd.yaml -n argocd
+
+  terraform-destroy:
+    name: Terraform destroy
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.action == 'destroy'
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform destroy
+        run: terraform destroy -auto-approve -input=false
