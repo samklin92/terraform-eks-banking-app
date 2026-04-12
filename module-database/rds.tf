@@ -45,23 +45,19 @@ resource "aws_db_instance" "mysql_db_instance" {
 
   multi_az = true
 
-  backup_retention_period = 7
-  backup_window           = "03:00-04:00"
-  maintenance_window      = "mon:04:00-mon:05:00"
+  backup_retention_period   = 7
+  backup_window             = "03:00-04:00"
+  maintenance_window        = "mon:04:00-mon:05:00"
 
   auto_minor_version_upgrade  = true
   allow_major_version_upgrade = false
 
-  deletion_protection     = true
-  skip_final_snapshot     = false
+  deletion_protection       = true
+  skip_final_snapshot       = false
   final_snapshot_identifier = "${var.environment}-mysql-final-snapshot"
-  copy_tags_to_snapshot   = true
+  copy_tags_to_snapshot     = true
 
-  performance_insights_enabled          = true
-  performance_insights_retention_period = 7
-
-  monitoring_interval = 60
-  monitoring_role_arn = aws_iam_role.rds_monitoring_role.arn
+  monitoring_interval = 0
 
   enabled_cloudwatch_logs_exports = [
     "audit",
