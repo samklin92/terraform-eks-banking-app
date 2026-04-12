@@ -19,3 +19,8 @@ tfsec
 *.crt
 .terraform/
 terraform.tfvars
+
+# Bootstrap local state
+bootstrap/.terraform/
+bootstrap/terraform.tfstate
+bootstrap/terraform.tfstate.backup
