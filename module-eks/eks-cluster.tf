@@ -1,7 +1,3 @@
-data "aws_eks_cluster_auth" "eks" {
-  name = aws_eks_cluster.eks.name
-}
-
 resource "aws_eks_cluster" "eks" {
   name     = "${var.environment}-${var.cluster_name}"
   role_arn = aws_iam_role.eks_cluster_role.arn
