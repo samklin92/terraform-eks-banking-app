@@ -1,11 +1,14 @@
 variable "environment" {
-  type = string
+  description = "Environment name"
+  type        = string
 }
 
 variable "domain_name" {
-  type = string
+  description = "Domain name for the hosted zone"
+  type        = string
 }
 
 variable "nginx_lb_hostname" {
-  type = string
+  description = "Nginx ingress load balancer hostname from EKS"
+  type        = string
 }
