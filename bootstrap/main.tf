@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 resource "aws_s3_bucket" "terraform_state" {
   bucket        = "banking-app-tfstate-${data.aws_caller_identity.current.account_id}"
   force_destroy = false
@@ -16,8 +18,9 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
   }
 }
 
-resource "aws_s3_bucket_encryption" "terraform_state" {
+resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
+
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -40,6 +43,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
   rule {
     id     = "expire-old-versions"
     status = "Enabled"
+
+    filter {}
 
     noncurrent_version_expiration {
       noncurrent_days = 90
@@ -67,5 +72,3 @@ resource "aws_dynamodb_table" "terraform_lock" {
     ManagedBy   = "terraform-bootstrap"
   }
 }
-
-data "aws_caller_identity" "current" {}
